@@ -1,0 +1,16 @@
+{
+  "name": "HONEY — планер маркетингу",
+  "short_name": "HONEY Планер",
+  "description": "Задачі маркетингу Honey Academy: канбан, план, календар, звіти",
+  "lang": "uk",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F2F3F6",
+  "theme_color": "#F0A81C",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
