@@ -321,6 +321,7 @@ function loadLocal(){try{const r=JSON.parse(localStorage.getItem(LKEY)||'null');
 function saveLocal(){try{localStorage.setItem(LKEY,JSON.stringify({tasks:all(),lists:LISTS}));}catch(e){toast('Браузер не дав зберегти дані');}}
 const newId=()=>'t'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 /* ---------- Google Sheets API (Apps Script) ---------- */
+const APP_VERSION='2026-09-24 · v1.4';
 const CKEY='honey-conn-v1',QKEY='honey-queue-v1',CACHE='honey-cache-v1';
 let CONN=null,PROFILE=null,queue=[],sync={state:'idle',at:null,err:''},flushing=false;
 const PKEY='honey-profile-v1';
@@ -418,7 +419,8 @@ function renderNav(){
    VIEWS.map(([k,l])=>`<button class="navbtn ${S.view===k?'on':''}" data-view="${k}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg>${l}${cnt[k]?`<span class="cnt">${cnt[k]}</span>`:''}</button>`).join('')+
    `<div class="spacer"></div><button class="btn pri newbtn" data-new="1">+ Нова задача</button>
    <div class="sync ${sync.state==='ok'&&!queue.length?'ok':''}" title="${esc(sync.err||'')}"><i style="${sync.state==='error'?'background:var(--danger)':sync.state==='offline'?'background:var(--honey)':''}"></i>${!CONN?'Не підключено':sync.state==='sync'?'Синхронізація…':sync.state==='offline'?'Офлайн'+(queue.length?' · '+queue.length+' у черзі':''):sync.state==='error'?'Помилка синхронізації':'Google Таблиця'+(queue.length?' · зберігаю '+queue.length:sync.at?' · '+new Date(sync.at).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}):'')}</div>
-   ${CONN?'<button class="navbtn" data-act="sync" style="font-size:12.5px">⟳ Оновити зараз</button>':''}`;
+   ${CONN?'<button class="navbtn" data-act="sync" style="font-size:12.5px">⟳ Оновити зараз</button>':''}
+   <div class="sync" style="opacity:.65">версія ${APP_VERSION}</div>`;
 }
 
 /* ---------- task row ---------- */
@@ -752,6 +754,7 @@ function vSet(){
    <div class="hint">У Google Таблиці: лист «Задачі» → Файл → Завантажити → CSV. Колонки розпізнаються за заголовками (№, Дата взяття в роботу, Бізнес-напрям, Задача, Тип, Функція, Періодичність, Пріоритет, Виконавець, План, Факт, Статус, Строк, Коментар). Задачі з таким самим № і текстом не дублюються.</div>
   </div>
   ${exportsList.length?`<h2>Останні вивантаження в Google Таблиці</h2><div class="list">${exportsList.map(x=>`<div class="task" style="cursor:default"><div class="body"><div class="t"><a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a></div><div class="meta"><span>${esc(x.count)} задач</span><span>${esc(x.scope||'')}</span><span>${x.at?new Date(x.at).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):''}</span></div></div></div>`).join('')}</div>`:''}
+  <p class="hint">Версія застосунку: <b>${APP_VERSION}</b>. Якщо тут стара версія після оновлення на GitHub — натисніть Ctrl+Shift+R (на телефоні: закрийте застосунок і відкрийте знову).</p>
   <p class="hint">Швидкі клавіші на ПК: <span class="kbd">N</span> — нова задача, <span class="kbd">/</span> — пошук.</p>`;
 }
 
@@ -809,19 +812,31 @@ function render(){
   const keep={y:window.scrollY||0,cols:{},wraps:[]};
   document.querySelectorAll('[data-dropdir]').forEach(c=>{const b=c.querySelector('.colb');if(b)keep.cols[c.dataset.dropdir]=b.scrollTop;});
   document.querySelectorAll('.tbl-wrap').forEach((el,i)=>keep.wraps[i]=el.scrollLeft);
+  let anchor=null;
+  if(S.focusId){const el=document.querySelector(`[data-edit="${S.focusId}"]`);
+    if(el&&el.getBoundingClientRect)anchor={id:S.focusId,top:el.getBoundingClientRect().top};}
   renderNav();
   const V={connect:vConnect,profile:vProfile,today:vToday,tasks:vTasks,kanban:vKanban,inbox:vInbox,plan:vPlan,cal:vCal,rep:vRep,set:vSet}[S.view];
   const bd=document.getElementById('board');const bx=bd?bd.scrollLeft:0;
   $('#main').innerHTML=V();
-  const bd2=document.getElementById('board');if(bd2&&bx)bd2.scrollLeft=bx;
-  document.querySelectorAll('[data-dropdir]').forEach(c=>{const b=c.querySelector('.colb'),v=keep.cols[c.dataset.dropdir];if(b&&v)b.scrollTop=v;});
-  document.querySelectorAll('.tbl-wrap').forEach((el,i)=>{if(keep.wraps[i])el.scrollLeft=keep.wraps[i];});
-  if(keep.y)window.scrollTo(0,keep.y);
+  const restore=()=>{
+    const b0=document.getElementById('board');if(b0&&bx)b0.scrollLeft=bx;
+    document.querySelectorAll('[data-dropdir]').forEach(c=>{const b=c.querySelector('.colb'),v=keep.cols[c.dataset.dropdir];if(b&&v)b.scrollTop=v;});
+    document.querySelectorAll('.tbl-wrap').forEach((el,i)=>{if(keep.wraps[i])el.scrollLeft=keep.wraps[i];});
+    if(keep.y&&window.scrollTo)window.scrollTo(0,keep.y);
+    if(!anchor)return;
+    const el=document.querySelector(`[data-edit="${anchor.id}"]`);
+    if(!el||!el.getBoundingClientRect)return;
+    const diff=el.getBoundingClientRect().top-anchor.top;
+    if(Math.abs(diff)>2){const sc=el.closest&&el.closest('.colb');
+      if(sc)sc.scrollTop+=diff;else if(window.scrollBy)window.scrollBy(0,diff);}
+  };
+  restore();
+  if(window.requestAnimationFrame)requestAnimationFrame(restore);
+  setTimeout(restore,90);
   if(S.focusId){const el=document.querySelector(`[data-edit="${S.focusId}"]`);
-    if(el){el.classList.add('flash');
-      const r=el.getBoundingClientRect(),h=window.innerHeight||0;
-      if(el.scrollIntoView&&(r.top<60||r.bottom>h-60))el.scrollIntoView({block:'center',behavior:'smooth'});}
-    clearTimeout(render._ft);render._ft=setTimeout(()=>{S.focusId=null;},2000);}
+    if(el)el.classList.add('flash');
+    clearTimeout(render._ft);render._ft=setTimeout(()=>{S.focusId=null;},2500);}
   if(fid){const el=document.getElementById(fid);if(el&&el.tagName!=='DIALOG'&&!$('#dlg').open){el.focus();if(sel&&el.setSelectionRange)try{el.setSelectionRange(sel[0],sel[1]);}catch(e){}}}
 }
 
