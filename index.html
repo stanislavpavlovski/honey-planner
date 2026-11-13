@@ -30,6 +30,16 @@
 :root[data-theme="dark"]{--st-todo-bg:#432226;--st-todo-fg:#F28B8B;--st-prog-bg:#1D3049;--st-prog-fg:#7DB0F0;--st-done-bg:#1B3326;--st-done-fg:#6FCB99;--st-moved-bg:#2F2427;--st-moved-fg:#D49A9A;--st-cancel-bg:#2A2D36;--st-cancel-fg:#9BA1B0;--st-wait-bg:#3B3317;--st-wait-fg:#F2D36B}
 /* кольорові мітки задач */
 :root{--fl-red:#D93F3F;--fl-orange:#EE8A1E;--fl-green:#2FA066;--fl-blue:#3A7BD5;--fl-purple:#8A5CD0}
+/* звіти: блоки «виконано | не виконано» */
+.rh{padding:9px 14px;font-weight:800;font-size:calc(13px * var(--fs));color:var(--muted);background:var(--surface2);border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
+.repcols{gap:0}
+.repcols>div+div{border-left:1px solid var(--line)}
+.repcols .empty{padding:18px 14px}
+@media (max-width:1100px){.repcols>div+div{border-left:0}}
+/* хто доручив */
+.by{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-weight:600;font-size:calc(12.5px * var(--fs));white-space:nowrap}
+.by .ava{width:18px;height:18px;font-size:calc(8.5px * var(--fs))}
+.by b{color:var(--ink);font-weight:700}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *,*::before,*::after{box-sizing:inherit}
 body{margin:0;background:var(--bg);color:var(--ink);font:calc(15px * var(--fs))/1.45 Manrope,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
@@ -355,9 +365,9 @@ const sortT=l=>l.sort((a,b)=>(isOver(b)-isOver(a))||(isClosed(a)-isClosed(b))||(
 function toast(msg){const el=document.createElement('div');el.className='toast';el.textContent=msg;document.body.appendChild(el);setTimeout(()=>el.remove(),2800);}
 
 /* ---------- state ---------- */
-const S={view:'today',day:today(),q:'',fDir:'',fOwner:'',fStatus:'',showDone:false,group:'dir',closed:new Set(),
+const S={view:'today',day:today(),q:'',fDir:'',fOwner:'',fBy:'',fStatus:'',showDone:false,group:'dir',closed:new Set(),
   planMode:'week',planAnchor:today(),calMode:'month',calAnchor:today(),calDay:today(),ganttDir:'',ganttDone:false,
-  focusId:null,mine:false,kbMine:false,kbSort:'date',kbAll:false,kbOpen:new Set(),flagMenu:null,flagOnly:false,kbDir:{date:1,start:1,num:-1,status:1,prio:1},tSort:'std',kbDone:false,kbEmpty:false,kbOwner:'',kbQ:'',repMode:'week',repAnchor:today(),repFrom:'',repTo:''};
+  focusId:null,mine:false,kbMine:false,kbSort:'date',kbAll:false,kbOpen:new Set(),flagMenu:null,flagOnly:false,repGroup:'dir',repSort:'due',repLayout:'cols',kbDir:{date:1,start:1,num:-1,status:1,prio:1},tSort:'std',kbDone:false,kbEmpty:false,kbOwner:'',kbQ:'',repMode:'week',repAnchor:today(),repFrom:'',repTo:''};
 
 /* ---------- storage ---------- */
 const LKEY='honey-planner-v1';
@@ -365,7 +375,7 @@ function loadLocal(){try{const r=JSON.parse(localStorage.getItem(LKEY)||'null');
 function saveLocal(){try{localStorage.setItem(LKEY,JSON.stringify({tasks:all(),lists:LISTS}));}catch(e){toast('Браузер не дав зберегти дані');}}
 const newId=()=>'t'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 /* ---------- Google Sheets API (Apps Script) ---------- */
-const APP_VERSION='2026-11-09 · v1.6';
+const APP_VERSION='2026-11-13 · v1.8';
 const CKEY='honey-conn-v1',QKEY='honey-queue-v1',CACHE='honey-cache-v1';
 let CONN=null,PROFILE=null,queue=[],sync={state:'idle',at:null,err:''},flushing=false;
 const PKEY='honey-profile-v1';
@@ -476,6 +486,7 @@ function taskRow(t,opt){
   ${t.n?`<span>№${esc(t.n)}</span>`:''}
   ${t.dir&&!opt.noDir?`<span class="chip"><i class="dot" style="background:${dirColor(t.dir)}"></i>${esc(t.dir)}</span>`:''}
   ${who(t.owner)}
+  ${authorChip(t)}
   ${isPersonal(t)?'<span class="lock">🔒 особиста</span>':''}
   ${t.prio&&prank(t.prio)<=2?`<span class="chip p${prank(t.prio)}">${esc(t.prio)}</span>`:(t.prio?`<span class="chip">${esc(t.prio)}</span>`:'')}
   ${stChip(t.status)}
@@ -517,6 +528,7 @@ function filtered(){
   return all().filter(t=>(S.showDone||!isClosed(t))
     &&(!S.fDir||(t.dir||'')===(S.fDir==='__none'?'':S.fDir))
     &&(!S.fOwner||(t.owner||'')===(S.fOwner==='__none'?'':S.fOwner))
+    &&(!S.fBy||(S.fBy==='byme'?(!!PROFILE&&authorOf(t)===PROFILE&&(t.owner||'')!==PROFILE):(!!PROFILE&&(t.owner||'')===PROFILE&&!!authorOf(t)&&authorOf(t)!==PROFILE)))
     &&(!S.fStatus||(S.fStatus==='__over'?isOver(t):t.status===S.fStatus))
     &&(!S.mine||mineT(t))
     &&(!S.flagOnly||t.flag)
@@ -553,6 +565,7 @@ function vTasks(){
    <input type="search" id="q" placeholder="Пошук за текстом, коментарем, №" value="${esc(S.q)}">
    <select id="fDir" aria-label="Напрям"><option value="">Усі напрями</option>${opts(LISTS.dirs,S.fDir)}<option value="__none" ${S.fDir==='__none'?'selected':''}>Без напряму</option></select>
    <select id="fOwner" aria-label="Виконавець"><option value="">Усі виконавці</option>${opts(LISTS.owner,S.fOwner)}<option value="__none" ${S.fOwner==='__none'?'selected':''}>Без виконавця</option></select>
+   <select id="fBy" aria-label="Хто доручив"><option value="">Усі постановники</option><option value="byme" ${S.fBy==='byme'?'selected':''}>Я доручив(ла) іншим</option><option value="tome" ${S.fBy==='tome'?'selected':''}>Доручено мені</option></select>
    <select id="fStatus" aria-label="Статус"><option value="">Усі статуси</option><option value="__over" ${S.fStatus==='__over'?'selected':''}>Прострочені</option>${opts(LISTS.status,S.fStatus)}</select>
    <select id="tSort" aria-label="Сортування">${[['std','Стандартний порядок'],['due','За строком'],['start','За датою старту'],['numd','За № — нові спочатку'],['numa','За № — старі спочатку']].map(([k,l])=>`<option value="${k}" ${S.tSort===k?'selected':''}>${l}</option>`).join('')}</select>
    <label class="tog"><input type="checkbox" id="showDone" ${S.showDone?'checked':''}> Показати закриті</label>
@@ -615,6 +628,7 @@ function kCard(t){
   <button class="kedbtn" data-kbopen="${t.id}" aria-label="${open?'Згорнути редагування':'Швидке редагування'}" title="${open?'Згорнути':'Змінити на картці'}">${open?'✕':'✎'}</button>
   <button class="chk ${done?'done':''}" data-toggle="${t.id}" aria-label="${done?'Повернути в роботу':'Позначити виконаною'}"><span>✓</span></button>
   <div class="body">${who(t.owner)}${isPersonal(t)?' <span class="lock">🔒</span>':''}<div class="kt">${esc(t.title)}</div><div class="meta">
+  ${authorChip(t)}
   ${t.prio?`<span class="chip ${prank(t.prio)<=2?'p'+prank(t.prio):''}">${esc(t.prio)}</span>`:''}
   ${stChip(t.status)}
   <span class="due">${deadline(t)?(t.due?'до '+fmt(t.due):fmt(t.start)):'без дати'}</span>
@@ -759,25 +773,77 @@ function repRange(){
   if(S.repMode==='quarter'){const q=Math.floor(a.getMonth()/3);return [iso(new Date(a.getFullYear(),q*3,1)),iso(new Date(a.getFullYear(),q*3+3,0)),`${q+1} квартал ${a.getFullYear()}`];}
   const f=S.repFrom||iso(new Date(a.getFullYear(),a.getMonth(),1)),t=S.repTo||today();return [f,t,`${fmt(f)} – ${fmt(t)}`];
 }
+const repAllTasks=r=>[...new Map([...r.scope,...r.over,...r.open].map(t=>[t.id,t])).values()];
 function repData(){
   const [F,L,label]=repRange();const inP=s=>!!s&&s>=F&&s<=L;
   const planned=all().filter(t=>inP(t.start));
   const done=all().filter(t=>isDone(t)&&inP(t.doneAt||t.due||t.start));
   const onTime=done.filter(t=>!t.due||(t.doneAt||t.due)<=t.due);
   const over=all().filter(t=>isOver(t)&&deadline(t)<=L);
+  // не виконано: відкриті задачі періоду + «в роботі» + прострочені/зі строком до кінця періоду
+  const open=all().filter(t=>!isClosed(t)&&(normStatus(t.status)==='В роботі'||inP(t.start)||(deadline(t)&&deadline(t)<=L)));
   const scope=[...new Map([...planned,...done].map(t=>[t.id,t])).values()];
   const p=planned.reduce((s,t)=>s+num(t.plan),0),f=scope.reduce((s,t)=>s+num(t.fact),0);
   const norm=workdays(F,L)*num(LISTS.norm);
-  return {F,L,label,planned,done,onTime,over,scope,p,f,norm};
+  return {F,L,label,planned,done,onTime,over,open,scope,p,f,norm};
+}
+const repGMode=blocks=>S.repGroup==='owner'?'owner':(S.repGroup==='dir'||blocks?'dir':'none');
+const repKeyF=(t,gm)=>gm==='owner'?(t.owner||''):(t.dir||'');
+const repColorF=(k,gm)=>gm==='owner'?(k?whoColor(k):'#9AA0AE'):dirColor(k);
+const repLabelF=(k,gm)=>k||(gm==='owner'?'Без виконавця':'Без напряму');
+function repGrouped(list,gm){
+  const m=new Map();list.forEach(t=>{const k=repKeyF(t,gm);if(!m.has(k))m.set(k,[]);m.get(k).push(t);});
+  const order=gm==='owner'?LISTS.owner:LISTS.dirs;
+  return [...m.keys()].sort((a,b)=>{const ia=a?order.indexOf(a):999,ib=b?order.indexOf(b):999;return (ia<0?500:ia)-(ib<0?500:ib)||a.localeCompare(b);}).map(k=>[k,m.get(k)]);
+}
+function repSorted(l,isDoneList){
+  const m=S.repSort;
+  const tm=x=>{const d=x?parse(x):null;return d?d.getTime():null;};
+  const asc=(x,y)=>x===y?0:x===null?1:y===null?-1:x-y;
+  const desc=(x,y)=>x===y?0:x===null?1:y===null?-1:y-x;
+  const nn=t=>num(t.n),dl=t=>tm(deadline(t)),pr=t=>prank(t.prio);
+  return l.sort((a,b)=>{
+    if(m==='start')return asc(tm(a.start),tm(b.start))||nn(a)-nn(b);
+    if(m==='done'&&isDoneList)return desc(tm(a.doneAt),tm(b.doneAt))||nn(b)-nn(a);
+    if(m==='numd')return nn(b)-nn(a);
+    if(m==='prio')return pr(a)-pr(b)||asc(dl(a),dl(b))||nn(a)-nn(b);
+    return asc(dl(a),dl(b))||pr(a)-pr(b)||nn(a)-nn(b);
+  });
+}
+function repGroupHtml(pfx,k,l,isDoneList,gm){
+  l=repSorted(l.slice(),isDoneList);const gid=pfx+':'+gm+':'+k;
+  const ov=l.filter(isOver).length,fh=l.reduce((s,t)=>s+num(t.fact),0),ph=l.reduce((s,t)=>s+num(t.plan),0);
+  const hrs=isDoneList?(fh?` · ${h(fh)} год`:''):(ph?` · ${h(ph)} год`:'');
+  return `<section class="group ${S.closed.has(gid)?'closed':''}"><div class="ghead" data-grp="${esc(gid)}" style="--c:${repColorF(k,gm)}"><span class="car">▾</span><b>${esc(repLabelF(k,gm))}</b><span class="sub">${l.length}${isDoneList?' викон.':' відкр.'}${ov?` · <span class="warn">${ov} простр.</span>`:''}${hrs}</span></div><div class="glist">${l.map(t=>taskRow(t,{noDir:gm==='dir'})).join('')}</div></section>`;
+}
+function repSection(title,list,isDoneList,pfx,emptyMsg,gm){
+  let body;
+  if(!list.length)body=`<div class="list">${emptyBox(emptyMsg)}</div>`;
+  else if(gm==='none')body=`<div class="list">${repSorted(list.slice(),isDoneList).map(t=>taskRow(t)).join('')}</div>`;
+  else body=repGrouped(list,gm).map(([k,l])=>repGroupHtml(pfx,k,l,isDoneList,gm)).join('');
+  return `<div><h2>${title} <span class="sub">(${list.length})</span></h2>${body}</div>`;
+}
+function repBlocks(r,gm){
+  const m=new Map();const add=(t,i)=>{const k=repKeyF(t,gm);if(!m.has(k))m.set(k,[[],[]]);m.get(k)[i].push(t);};
+  r.done.forEach(t=>add(t,0));r.open.forEach(t=>add(t,1));
+  const keys=repGrouped([...r.done,...r.open],gm).map(x=>x[0]);
+  if(!keys.length)return `<div class="card">${emptyBox('За цей період задач немає')}</div>`;
+  return keys.map(k=>{
+    const D=repSorted(m.get(k)[0].slice(),true),O=repSorted(m.get(k)[1].slice(),false);
+    const gid='repb:'+gm+':'+k,ov=O.filter(isOver).length;
+    const col=(title,l,isDoneList)=>`<div><div class="rh"><span>${title}</span><span>${l.length}</span></div>${l.length?l.map(t=>taskRow(t,{noDir:gm==='dir'})).join(''):emptyBox('—')}</div>`;
+    return `<section class="group ${S.closed.has(gid)?'closed':''}"><div class="ghead" data-grp="${esc(gid)}" style="--c:${repColorF(k,gm)}"><span class="car">▾</span><b>${esc(repLabelF(k,gm))}</b><span class="sub">✓ ${D.length} виконано · ${O.length} не виконано${ov?` · <span class="warn">${ov} простр.</span>`:''}</span></div>
+    <div class="glist"><div class="grid2 repcols">${col('✓ Виконано',D,true)}${col('Не виконано',O,false)}</div></div></section>`;}).join('');
 }
 function vRep(){
-  const r=repData();
+  const r=repData();const gm=repGMode(S.repLayout==='blocks');
   const rate=r.planned.length?Math.round(r.planned.filter(isDone).length/r.planned.length*100):0;
   const ot=r.done.length?Math.round(r.onTime.length/r.done.length*100):0;
   return head('Звіти',r.label,'rep')+`
   <div class="stats">
    <div class="stat"><b>${r.planned.length}</b><span>заплановано на період</span></div>
    <div class="stat good"><b>${r.done.length}</b><span>виконано за період</span></div>
+   <div class="stat"><b>${r.open.length}</b><span>не виконано (відкриті)</span></div>
    <div class="stat"><b>${rate}%</b><span>виконання плану</span></div>
    <div class="stat"><b>${ot}%</b><span>вчасно (до строку)</span></div>
    <div class="stat ${r.over.length?'warn':''}"><b>${r.over.length}</b><span>прострочено зараз</span></div>
@@ -788,14 +854,22 @@ function vRep(){
   <h2>По бізнес-напрямах</h2>${breakdown(r.scope,'dir')}
   <h2>По виконавцях</h2>${breakdown(r.scope,'owner')}
   <h2>По функціях</h2>${breakdown(r.scope,'func')}
-  <div class="grid2"><div><h2>Виконано <span class="sub">(${r.done.length})</span></h2><div class="list">${r.done.length?sortT(r.done).map(t=>taskRow(t)).join(''):emptyBox('Ще нічого не закрито')}</div></div>
-  <div><h2>Прострочено <span class="sub">(${r.over.length})</span></h2><div class="list">${r.over.length?sortT(r.over).map(t=>taskRow(t)).join(''):emptyBox('Прострочених немає')}</div></div></div>`;
+  <h2>Задачі за період</h2>
+  <div class="filters" style="align-items:center">
+   <span class="sub">Розкладка:</span><div class="seg" role="group" aria-label="Розкладка">${[['cols','Два списки'],['blocks','Поруч у групах']].map(([k,l])=>`<button class="${S.repLayout===k?'on':''}" data-replayout="${k}">${l}</button>`).join('')}</div>
+   <span class="sub">Групувати:</span><div class="seg" role="group" aria-label="Групування">${[['dir','Напрям'],['owner','Виконавець'],['none','Без груп']].map(([k,l])=>`<button class="${S.repGroup===k?'on':''}" data-repgroup="${k}">${l}</button>`).join('')}</div>
+   <select id="repSort" aria-label="Сортування">${[['due','За строком'],['start','За датою старту'],['done','За датою виконання'],['numd','За № — нові спочатку'],['prio','За пріоритетом']].map(([k,l])=>`<option value="${k}" ${S.repSort===k?'selected':''}>${l}</option>`).join('')}</select>
+  </div>
+  <div class="hint" style="margin-top:0">«Не виконано» — відкриті задачі періоду, усе, що «в роботі», і прострочені.${S.repLayout==='blocks'&&S.repGroup==='none'?' У режимі «Поруч у групах» без групування показано за напрямами.':''}</div>
+  ${S.repLayout==='blocks'?repBlocks(r,gm):`<div class="grid2">${repSection('Виконано',r.done,true,'repd','Ще нічого не закрито',gm)}${repSection('Не виконано',r.open,false,'repo','Усе виконано — відкритих задач немає',gm)}</div>`}`;
 }
 function summaryText(){
-  const r=repData();const lines=[`📊 Маркетинг — звіт: ${r.label}`,`Заплановано: ${r.planned.length} · Виконано: ${r.done.length} · Прострочено: ${r.over.length}`,`Години план/факт: ${h(r.p)} / ${h(r.f)} (норма ${h(r.norm)})`,''];
-  const byDir=new Map();r.done.forEach(t=>{const k=t.dir||'Без напряму';if(!byDir.has(k))byDir.set(k,[]);byDir.get(k).push(t);});
-  if(r.done.length){lines.push('✅ Виконано:');byDir.forEach((l,k)=>{lines.push(`— ${k}:`);l.forEach(t=>lines.push(`   • ${t.title}${t.owner?' ('+t.owner+')':''}`));});lines.push('');}
-  if(r.over.length){lines.push('⚠️ Прострочено:');sortT(r.over).forEach(t=>lines.push(`   • ${t.title} — строк ${fmt(deadline(t))}${t.owner?', '+t.owner:''}`));lines.push('');}
+  const r=repData();const gm=S.repGroup==='owner'?'owner':'dir';
+  const lines=[`📊 Маркетинг — звіт: ${r.label}`,`Заплановано: ${r.planned.length} · Виконано: ${r.done.length} · Не виконано: ${r.open.length} (з них прострочено: ${r.open.filter(isOver).length})`,`Години план/факт: ${h(r.p)} / ${h(r.f)} (норма ${h(r.norm)})`,''];
+  const frm=t=>{const a=authorOf(t);return a&&a!==(t.owner||'')?' ← від '+a:'';};
+  const side=t=>(gm==='dir'?(t.owner?' ('+t.owner+')':''):(t.dir?' ['+t.dir+']':''))+frm(t);
+  if(r.done.length){lines.push('✅ Виконано:');repGrouped(r.done,gm).forEach(([k,l])=>{lines.push(`— ${repLabelF(k,gm)} (${l.length}):`);repSorted(l.slice(),true).forEach(t=>lines.push(`   • ${t.title}${side(t)}`));});lines.push('');}
+  if(r.open.length){lines.push('⏳ Не виконано:');repGrouped(r.open,gm).forEach(([k,l])=>{lines.push(`— ${repLabelF(k,gm)} (${l.length}):`);repSorted(l.slice(),false).forEach(t=>lines.push(`   • ${t.title} — ${normStatus(t.status)}${deadline(t)?', строк '+fmt(deadline(t)):''}${isOver(t)?' ⚠':''}${side(t)}`));});lines.push('');}
   const nx=sortT(all().filter(t=>!isClosed(t)&&t.start>r.L&&t.start<=iso(addDays(parse(r.L),7))));
   if(nx.length){lines.push('🗓 Далі (7 днів):');nx.forEach(t=>lines.push(`   • ${fmt(t.start)} ${t.title}`));}
   return lines.join('\n');
@@ -860,6 +934,8 @@ const ava=n=>`<span class="ava" style="background:${n?whoColor(n):'#9AA0AE'}">${
 const who=n=>`<span class="who ${n?'':'none'}">${ava(n)}${esc(n||'без виконавця')}</span>`;
 const mineT=t=>!!PROFILE&&((t.owner||'')===PROFILE||(t.ownerUser||'')===PROFILE);
 const isPersonal=t=>t.vis==='Особиста';
+const authorOf=t=>t.author||t.ownerUser||'';
+const authorChip=t=>{const a=authorOf(t);return a&&a!==(t.owner||'')?`<span class="by" title="Доручив(ла): ${esc(a)}">від ${ava(a)}<b>${esc(a)}</b></span>`:'';};
 function vProfile(){
   return `<div class="head"><h1>Хто ви?</h1></div>
   <div class="card" style="padding:18px;max-width:660px">
@@ -913,7 +989,8 @@ function render(){
 
 /* ---------- task dialog ---------- */
 function openTask(id,preset){
-  const t=id?Object.assign({},tasks.get(id)):Object.assign({n:nextN(),start:today(),status:'Зробити',period:'Разова',type:'Опер',owner:PROFILE||'',ownerUser:PROFILE||'',vis:'Спільна',created:today()},preset||{});
+  const t=id?Object.assign({},tasks.get(id)):Object.assign({n:nextN(),start:today(),status:'Зробити',period:'Разова',type:'Опер',owner:PROFILE||'',author:PROFILE||'',ownerUser:PROFILE||'',vis:'Спільна',created:today()},preset||{});
+  if(id&&t&&!t.author)t.author=t.ownerUser||'';
   if(!t)return;editing=id||null;
   const wk=t.start?isoWeek(parse(t.start)):'—';
   const sel=(name,arr,label,cls)=>`<label class="field ${cls}">${label}<select name="${name}">${opts(arr.includes(t[name])||!t[name]?arr:[t[name]].concat(arr),t[name]||'','—')}</select></label>`;
@@ -926,10 +1003,10 @@ function openTask(id,preset){
    <label class="field s2">Тиждень<input type="text" value="${wk}" disabled id="wk"></label>
    <div class="field s2">Виконавець<div style="display:flex;gap:4px;min-width:0"><select name="owner" style="flex:1;min-width:0">${opts(LISTS.owner.includes(t.owner)||!t.owner?LISTS.owner:[t.owner].concat(LISTS.owner),t.owner||'','—')}</select><button type="button" class="btn sm" data-addowner="1" title="Додати нового виконавця" aria-label="Додати нового виконавця">＋</button></div></div>${sel('prio',LISTS.prio,'Пріоритет','s2')}${sel('status',LISTS.status,'Статус','s2')}
    <div class="s6" id="ownAdd" style="display:none;gap:8px;align-items:center"><input type="text" id="ownNew" placeholder="Нове ім’я, напр. Коваленко О." autocomplete="off" style="flex:1;min-width:0"><button type="button" class="btn pri sm" data-ownok="1">Додати виконавця</button></div>
-   ${sel('type',LISTS.type,'Тип','s2')}${sel('period',LISTS.period,'Періодичність','s2')}
+   ${sel('author',LISTS.owner,'Хто доручив','s2')}${sel('type',LISTS.type,'Тип','s2')}${sel('period',LISTS.period,'Періодичність','s2')}
    <label class="field s2">№<input type="number" name="n" value="${esc(t.n||'')}"></label>
-   <label class="field s3">План, год<input type="number" step="0.5" min="0" name="plan" value="${esc(t.plan||'')}"></label>
-   <label class="field s3">Факт, год<input type="number" step="0.5" min="0" name="fact" value="${esc(t.fact||'')}"></label>
+   <label class="field s2">План, год<input type="number" step="0.5" min="0" name="plan" value="${esc(t.plan||'')}"></label>
+   <label class="field s2">Факт, год<input type="number" step="0.5" min="0" name="fact" value="${esc(t.fact||'')}"></label>
    <label class="field s6">Коментар<textarea name="comment" rows="2">${esc(t.comment||'')}</textarea></label>
    ${isDone(t)&&t.doneAt?`<div class="s6 sub">✓ Закрито ${fmt(t.doneAt)} — дата ставиться автоматично</div>`:''}
    <label class="tog s6"><input type="checkbox" name="personal" ${isPersonal(t)?'checked':''}> 🔒 Особиста задача — бачу тільки я${t.ownerUser&&t.ownerUser!==PROFILE?` <span class="sub">(власник: ${esc(t.ownerUser)})</span>`:''}</label>
@@ -942,7 +1019,10 @@ function openTask(id,preset){
   f.status.addEventListener('change',()=>{f.status.className='stsel '+stKey(f.status.value);});
   fm.addEventListener('submit',async e=>{e.preventDefault();
     const o=editing?Object.assign({},tasks.get(editing)):{created:today()};
-    ['title','dir','func','start','due','owner','prio','status','type','period','comment'].forEach(k=>o[k]=(f[k].value||'').trim());
+    const prevOwner=editing?(tasks.get(editing).owner||''):'';
+    ['title','dir','func','start','due','owner','author','prio','status','type','period','comment'].forEach(k=>o[k]=(f[k].value||'').trim());
+    // якщо виконавця змінили, а постановника немає — постановник це той, хто перепризначив
+    if(editing&&!o.author&&o.owner&&PROFILE&&o.owner!==PROFILE&&prevOwner!==o.owner)o.author=PROFILE;
     o.status=normStatus(o.status);
     o.vis=f.personal.checked?'Особиста':'Спільна';
     if(!o.ownerUser)o.ownerUser=PROFILE||'';
@@ -974,11 +1054,12 @@ async function toggle(id){
 }
 
 /* ---------- CSV ---------- */
-const COLS=[['n','№'],['start','Дата взяття в роботу'],['dir','Бізнес-напрям'],['title','Задача'],['type','Тип'],['func','Функція'],['period','Періодичність'],['prio','Пріоритет'],['owner','Виконавець'],['plan','План, год'],['fact','Факт, год'],['status','Статус'],['due','Строк'],['week','Тиждень'],['comment','Коментар'],['flag','Мітка'],['doneAt','Дата виконання']];
+const COLS=[['n','№'],['start','Дата взяття в роботу'],['dir','Бізнес-напрям'],['title','Задача'],['type','Тип'],['func','Функція'],['period','Періодичність'],['prio','Пріоритет'],['owner','Виконавець'],['author','Хто доручив'],['plan','План, год'],['fact','Факт, год'],['status','Статус'],['due','Строк'],['week','Тиждень'],['comment','Коментар'],['flag','Мітка'],['doneAt','Дата виконання']];
 function toCSV(list){
   const q=v=>{v=v==null?'':String(v);return /[;"\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const rows=[COLS.map(c=>c[1]).join(';')];
   sortT(list.slice()).sort((a,b)=>num(a.n)-num(b.n)).forEach(t=>rows.push(COLS.map(([k])=>{
+    if(k==='author')return q(authorOf(t));
     if(k==='week')return t.start?isoWeek(parse(t.start)):'';
     if(['start','due','doneAt'].includes(k))return q(fmt(t[k]));
     if(k==='plan'||k==='fact')return t[k]===''||t[k]==null?'':String(t[k]).replace('.',',');
@@ -1025,7 +1106,7 @@ async function importCSV(text){
 function exportScope(scope){
   if(scope==='filter')return {list:filtered(),label:'поточна вибірка'};
   if(scope==='open')return {list:all().filter(t=>!isClosed(t)),label:'відкриті задачі'};
-  if(scope==='period'){const r=repData();const l=r.scope.concat(r.over.filter(t=>!r.scope.includes(t)));return {list:l,label:'звіт: '+r.label,rep:r};}
+  if(scope==='period'){const r=repData();return {list:repAllTasks(r),label:'звіт: '+r.label,rep:r};}
   return {list:all(),label:'усі задачі'};
 }
 function summaryRows(list,key,title){
@@ -1034,10 +1115,10 @@ function summaryRows(list,key,title){
   return [[title,'Задач','Відкрито','Виконано','Прострочено','План, год','Факт, год']].concat(rows);
 }
 function buildSheets(sc,withSum){
-  const head=['№','Дата взяття в роботу','Бізнес-напрям','Задача','Тип','Функція','Періодичність','Пріоритет','Виконавець','План, год','Факт, год','Статус','Строк','Тиждень','Коментар','Дата виконання','Прострочено','Мітка'];
+  const head=['№','Дата взяття в роботу','Бізнес-напрям','Задача','Тип','Функція','Періодичність','Пріоритет','Виконавець','План, год','Факт, год','Статус','Строк','Тиждень','Коментар','Дата виконання','Прострочено','Мітка','Хто доручив'];
   const list=sc.list.slice().sort((a,b)=>(num(a.n)||1e9)-(num(b.n)||1e9)||String(a.start||'9').localeCompare(String(b.start||'9')));
-  const rows=list.map(t=>[t.n===''||t.n==null?'':num(t.n),t.start||'',t.dir||'',t.title||'',t.type||'',t.func||'',t.period||'',t.prio||'',t.owner||'',t.plan===''||t.plan==null?'':num(t.plan),t.fact===''||t.fact==null?'':num(t.fact),t.status||'',t.due||'',t.start?isoWeek(parse(t.start)):'',t.comment||'',t.doneAt||'',isOver(t)?'так':'',t.flag||'']);
-  const sheets=[{name:'Задачі',rows:[head].concat(rows),dateCols:[1,12,15],widths:[45,110,140,420,60,170,100,100,120,70,70,100,90,65,260,110,90,100],filter:true,wrapCol:3}];
+  const rows=list.map(t=>[t.n===''||t.n==null?'':num(t.n),t.start||'',t.dir||'',t.title||'',t.type||'',t.func||'',t.period||'',t.prio||'',t.owner||'',t.plan===''||t.plan==null?'':num(t.plan),t.fact===''||t.fact==null?'':num(t.fact),t.status||'',t.due||'',t.start?isoWeek(parse(t.start)):'',t.comment||'',t.doneAt||'',isOver(t)?'так':'',t.flag||'',authorOf(t)]);
+  const sheets=[{name:'Задачі',rows:[head].concat(rows),dateCols:[1,12,15],widths:[45,110,140,420,60,170,100,100,120,70,70,100,90,65,260,110,90,100,120],filter:true,wrapCol:3}];
   if(withSum){
     sheets.push({name:'По напрямах',rows:summaryRows(sc.list,'dir','Бізнес-напрям'),widths:[180,70,80,80,95,80,80]});
     sheets.push({name:'По виконавцях',rows:summaryRows(sc.list,'owner','Виконавець'),widths:[160,70,80,80,95,80,80]});
@@ -1076,7 +1157,7 @@ async function runExport(){
 /* ---------- events ---------- */
 document.addEventListener('click',async e=>{
   if(e.target.closest('.kedit input,.kedit select,.kedit label'))return;
-  const el=e.target.closest('[data-view],[data-new],[data-toggle],[data-edit],[data-grp],[data-group],[data-mode],[data-shift],[data-dayshift],[data-daytoday],[data-day],[data-act],[data-th],[data-close],[data-del],[data-dup],[data-kbsort],[data-kbdesc],[data-newdir],[data-kbopen],[data-kbshift],[data-gs],[data-setprofile],[data-fsz],[data-addowner],[data-ownok],[data-flag],[data-flagset]');
+  const el=e.target.closest('[data-view],[data-new],[data-toggle],[data-edit],[data-grp],[data-group],[data-mode],[data-shift],[data-dayshift],[data-daytoday],[data-day],[data-act],[data-th],[data-close],[data-del],[data-dup],[data-kbsort],[data-kbdesc],[data-newdir],[data-kbopen],[data-kbshift],[data-gs],[data-setprofile],[data-fsz],[data-addowner],[data-ownok],[data-flag],[data-flagset],[data-repgroup],[data-replayout]');
   if(S.flagMenu&&!(e.target.closest&&e.target.closest('[data-flag],[data-flagset],.flagrow'))){S.flagMenu=null;render();}
   if(!el)return;const d=el.dataset;
   if(d.view){S.view=d.view;render();window.scrollTo(0,0);return;}
@@ -1095,6 +1176,8 @@ document.addEventListener('click',async e=>{
   if(d.kbshift){e.stopPropagation();const [id,n]=d.kbshift.split(':');const t=Object.assign({},tasks.get(id));if(!t.id)return;
     const base=t.start||today();t.start=iso(addDays(parse(base),+n));if(t.due)t.due=iso(addDays(parse(t.due),+n));if(!isClosed(t))t.status='Перенесено';
     await putTask(t);toast('Перенесено на '+fmt(t.start)+(t.due?' · строк '+fmt(t.due):''));render();return;}
+  if(d.repgroup){S.repGroup=d.repgroup;render();return;}
+  if(d.replayout){S.repLayout=d.replayout;render();return;}
   if(d.flag){const t=tasks.get(d.flag);if(!t)return;
     if(!t.flag){await putTask(Object.assign({},t,{flag:'червона'}));S.flagMenu=t.id;}
     else S.flagMenu=S.flagMenu===t.id?null:t.id;
@@ -1107,6 +1190,8 @@ document.addEventListener('click',async e=>{
     if(!ex){LISTS.owner=LISTS.owner.concat([fin]);await putLists();}
     const sl=document.querySelector('#tf select[name="owner"]');
     if(sl){if(![...sl.options].some(o=>o.value===fin)){const op=document.createElement('option');op.value=fin;op.textContent=fin;sl.appendChild(op);}sl.value=fin;}
+    const sa=document.querySelector('#tf select[name="author"]');
+    if(sa&&![...sa.options].some(o=>o.value===fin)){const op=document.createElement('option');op.value=fin;op.textContent=fin;sa.appendChild(op);}
     inp.value='';$('#ownAdd').style.display='none';toast(ex?'Такий виконавець уже є — обрано його':'Виконавця додано: '+fin);return;}
   if(d.kbsort){S.kbSort=d.kbsort;render();return;}
   if(d.kbdesc){S.kbDir[S.kbSort]=-(S.kbDir[S.kbSort]||1);render();return;}
@@ -1132,7 +1217,7 @@ document.addEventListener('click',async e=>{
   if(d.act==='savelists'){document.querySelectorAll('[data-list]').forEach(t=>LISTS[t.dataset.list]=t.value.split('\n').map(s=>s.trim()).filter(Boolean));LISTS.norm=num($('#norm').value)||8;await putLists();toast('Довідники збережено');render();return;}
   if(d.act==='resetlists'){if(confirm('Повернути стандартні довідники з таблиці?')){LISTS=JSON.parse(JSON.stringify(DEFAULT_LISTS));await putLists();render();}return;}
   if(d.act==='csv'){download('honey-zadachi-'+today()+'.csv',toCSV(all()));return;}
-  if(d.act==='repcsv'){const r=repData();download(`honey-zvit-${r.F}_${r.L}.csv`,toCSV(r.scope.concat(r.over.filter(t=>!r.scope.includes(t)))));return;}
+  if(d.act==='repcsv'){const r=repData();download(`honey-zvit-${r.F}_${r.L}.csv`,toCSV(repAllTasks(r)));return;}
   if(d.act==='summary'){const txt=summaryText();
     $('#dlg').innerHTML=`<div class="dlg"><header><h3>Текстовий звіт</h3><div class="grow"></div><button class="btn ghost" data-close="1" aria-label="Закрити">✕</button></header><div class="bd"><textarea class="s6" id="sumt" rows="16" style="min-height:320px">${esc(txt)}</textarea></div><footer><button class="btn pri" data-act="copy">Копіювати</button></footer></div>`;
     $('#dlg').showModal();return;}
@@ -1145,11 +1230,13 @@ document.addEventListener('input',e=>{const t=e.target;
 document.addEventListener('change',async e=>{const t=e.target;
   if(t.id==='fDir'){S.fDir=t.value;render();}
   else if(t.id==='fOwner'){S.fOwner=t.value;render();}
+  else if(t.id==='fBy'){S.fBy=t.value;render();}
   else if(t.id==='fStatus'){S.fStatus=t.value;render();}
   else if(t.id==='showDone'){S.showDone=t.checked;render();}
   else if(t.id==='mine'){S.mine=t.checked;render();}
   else if(t.id==='flagOnly'){S.flagOnly=t.checked;render();}
   else if(t.id==='tSort'){S.tSort=t.value;render();}
+  else if(t.id==='repSort'){S.repSort=t.value;render();}
   else if(t.id==='kbMine'){S.kbMine=t.checked;render();}
   else if(t.id==='dayPick'){if(t.value){S.day=t.value;render();}}
   else if(t.id==='kbOwner'){S.kbOwner=t.value;render();}
@@ -1164,6 +1251,7 @@ document.addEventListener('change',async e=>{const t=e.target;
   else if(t.dataset.inline){const id=t.dataset.inline,f=t.dataset.field;const prev=tasks.get(id);if(!prev)return;const o=Object.assign({},prev);
     let v=t.value;if(f==='plan'||f==='fact')v=v===''?'':num(v);
     if(o[f]===v)return;o[f]=v;
+    if(f==='owner'&&v&&PROFILE&&v!==PROFILE&&!authorOf(o))o.author=PROFILE;
     if(f==='start'&&v&&o.status==='Очікує плану')o.status='Зробити';
     if(f==='status'){if(v==='Виконано')o.doneAt=o.doneAt||today();else o.doneAt='';}
     await putTask(o);
